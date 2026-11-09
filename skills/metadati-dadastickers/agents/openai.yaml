@@ -1,0 +1,6 @@
+interface:
+  display_name: "Metadati Dadastickers"
+  short_description: "Metadati unici per le sottopagine con gli enunciati Dadastickers"
+  default_prompt: "Usa $metadati-dadastickers per dare a ogni sottopagina metadati propri dove oggi ripetono quelli della home."
+policy:
+  allow_implicit_invocation: false
