@@ -3,10 +3,12 @@
 //   bun statements.ts find "<text>"        check that a statement exists verbatim
 //   bun statements.ts characters           recurring characters and how many statements carry each
 //   bun statements.ts stats                corpus overview
+import { callApi } from "./remote";
 import { FIELDS, LIMITS, SEPARATOR, arg, has, len, loadStatements, pad, tokenize, type Field, type Statement } from "./lib";
 
 const command = Bun.argv[2];
-const all = await loadStatements();
+const local = await loadStatements();
+const all = local ?? [];
 
 const SEED_CHARACTERS = [
   "dada", "mamma", "chi", "le bionde", "il tucano", "i denari", "il tampoon", "il principino",
@@ -57,7 +59,26 @@ async function usedInPlan(path: string | undefined): Promise<Set<string>> {
   return used;
 }
 
+async function pickRemote() {
+  const field = arg("--field");
+  if (field && !FIELDS.includes(field as Field)) throw new Error(`Unknown field ${field}. Use one of: ${FIELDS.join(", ")}`);
+  const exclude = [...(await usedInPlan(arg("--exclude-plan")))];
+  const input = {
+    field, facts: arg("--facts"), suffix: arg("--suffix"), separator: arg("--separator"), budget: arg("--budget") ? Number(arg("--budget")) : undefined,
+    keywords: arg("--keywords"), character: arg("--character"), ending: arg("--ending"), rarity: arg("--rarity"),
+    words: arg("--words"), match: arg("--match"), loose: has("--loose"), sort: arg("--sort"), exclude,
+  };
+  const r = await callApi<{ limit?: number; budget: number; df: Record<string, number>; unlocked: number; cap: number; candidates: (Statement & { hits: string[]; score: number; slack: number })[] }>("pick", input);
+  if (has("--json")) { console.log(JSON.stringify({ field, limit: r.limit, budget: r.budget, candidates: r.candidates }, null, 2)); return; }
+  console.log(`field ${field ?? "-"}  limit ${r.limit ?? "-"}  budget for the statement ${r.budget}  (service: at most 3 candidates, ${r.unlocked}/${r.cap} statements seen)`);
+  for (const [k, n] of Object.entries(r.df)) console.log(`  keyword ${pad(k, 18)} in ${n} statements`);
+  if (!r.candidates.length) console.log("No candidates. Add synonyms or metaphorical keywords, relax a filter, or shorten the facts.");
+  console.log(`${pad("slack", 6)}${pad("len", 5)}${pad("rar", 5)}${pad("hits", 24)}statement`);
+  for (const c of r.candidates) console.log(`${pad(c.slack, 6)}${pad(c.length, 5)}${pad(c.rarity, 5)}${pad(c.hits.join(",") || "-", 24)}${c.text}`);
+}
+
 async function pick() {
+  if (!local) return pickRemote();
   const field = arg("--field") as Field | undefined;
   if (field && !FIELDS.includes(field)) throw new Error(`Unknown field ${field}. Use one of: ${FIELDS.join(", ")}`);
   const facts = arg("--facts") ?? "";
@@ -112,7 +133,13 @@ async function pick() {
   for (const r of rows) console.log(`${pad(r.slack, 6)}${pad(r.s.length, 5)}${pad(r.s.rarity, 5)}${pad(r.hits.join(",") || "-", 24)}${r.s.text}`);
 }
 
-function find() {
+async function find() {
+  if (!local) {
+    const r = await callApi<{ exists: boolean }>("verify", { text: Bun.argv[3] ?? "" });
+    console.log(r.exists ? "exact match" : "no match");
+    if (!r.exists) process.exitCode = 1;
+    return;
+  }
   const query = (Bun.argv[3] ?? "").trim().replace(/\s+/g, " ");
   const exact = all.find((s) => s.text === query);
   if (exact) { console.log(`exact match (${exact.length} chars, rarity ${exact.rarity})\n${exact.text}`); return; }
@@ -122,7 +149,8 @@ function find() {
   process.exitCode = 1;
 }
 
-function characters() {
+async function characters() {
+  if (!local) { for (const l of (await callApi<{ lines: string[] }>("characters", { min: Number(arg("--min") ?? 10) })).lines) console.log(l); return; }
   console.log("Recurring characters (statements that carry each):");
   for (const c of SEED_CHARACTERS) {
     const re = phraseRe(c);
@@ -142,7 +170,8 @@ function characters() {
   console.log([...counts].filter(([, n]) => n >= min).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(", "));
 }
 
-function stats() {
+async function stats() {
+  if (!local) { for (const l of (await callApi<{ lines: string[] }>("stats")).lines) console.log(l); return; }
   const by = <T,>(f: (s: Statement) => T) => all.reduce((m, s) => m.set(f(s), (m.get(f(s)) ?? 0) + 1), new Map<T, number>());
   console.log(`statements ${all.length}`);
   console.log(`endings ${JSON.stringify(Object.fromEntries(by((s) => s.ending)))}`);

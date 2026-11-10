@@ -2,6 +2,7 @@
 //   bun check.ts <plan.json> [--detect <detect.json>] [--write]
 // --detect  refuses fields the page already customized and lists eligible fields the plan leaves out.
 // --write   stores each composed value in the plan as "value", ready to copy into code.
+import { callApi } from "./remote";
 import { FIELDS, LIMITS, SEPARATOR, arg, compose, has, len, loadStatements, styleIssues, type Field, type FieldDraft } from "./lib";
 
 type Page = { path: string; section?: string; fields: Partial<Record<Field, FieldDraft>> };
@@ -17,8 +18,18 @@ const plan: Plan = await Bun.file(planPath).json();
 const detectPath = arg("--detect");
 const detected: Detected | undefined = detectPath ? await Bun.file(detectPath).json() : undefined;
 const separator = plan.separator ?? SEPARATOR;
-const corpus = new Set((await loadStatements()).map((s) => s.text));
+const local = await loadStatements();
+const corpus = new Set((local ?? []).map((s) => s.text));
 const norm = (s: string) => s.trim().replace(/\s+/g, " ");
+// Without the local corpus, ask the service yes or no for each distinct statement in the plan.
+const verified = new Map<string, boolean>();
+if (!local) {
+  for (const page of plan.pages) for (const d of Object.values(page.fields) as FieldDraft[]) {
+    const t = norm(d?.statement ?? "");
+    if (t && !verified.has(t)) verified.set(t, (await callApi<{ exists: boolean }>("verify", { text: t })).exists);
+  }
+}
+const inCorpus = (t: string) => (local ? corpus.has(t) : verified.get(t) === true);
 
 const home: Partial<Record<string, string>> = { ...plan.home };
 if (detected) for (const [f, v] of Object.entries(detected.home.fields)) home[f] ??= v.value;
@@ -47,7 +58,7 @@ for (const page of plan.pages) {
 
     if (seen && seen.fields[field]?.status === "own") errors.push(`${where(field)}: the page already has its own value; leave it as it is`);
     if (!statement) errors.push(`${where(field)}: statement missing`);
-    else if (!corpus.has(statement)) errors.push(`${where(field)}: statement not found verbatim in the corpus (check with statements.ts find)`);
+    else if (!inCorpus(statement)) errors.push(`${where(field)}: statement not found verbatim in the corpus (check with statements.ts find)`);
     if (!draft.facts?.trim()) errors.push(`${where(field)}: facts missing; the field must open with plain page facts`);
     if (slack < 0) errors.push(`${where(field)}: ${size} characters, ${-slack} over the ${limit} limit`);
     else if (slack > Math.max(5, Math.round(limit * 0.1))) warnings.push(`${where(field)}: ${slack} characters left; a longer statement or fuller facts would fit closer`);

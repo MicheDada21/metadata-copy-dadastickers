@@ -3,8 +3,6 @@ import { dirname, join } from "node:path";
 
 export const SKILL_DIR = join(dirname(import.meta.path), "..");
 export const CSV_PATH = join(SKILL_DIR, "data", "enunciati.csv");
-// Public copy of the statements, used when the skill was installed without data/.
-export const CSV_URL = "https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadata-copy-dadastickers/files/data/enunciati.csv";
 export const SEPARATOR = " · ";
 
 // Character caps per field, verified 2026-10-26. Sources and reasoning: references/limits.md.
@@ -80,14 +78,11 @@ function parseCsv(raw: string): string[] {
 
 let cache: Statement[] | undefined;
 
-export async function loadStatements(): Promise<Statement[]> {
+// The full corpus is not distributed. With data/enunciati.csv present everything runs locally;
+// without it this returns null and the scripts use the capped service (see remote.ts).
+export async function loadStatements(): Promise<Statement[] | null> {
   if (cache) return cache;
-  if (!(await Bun.file(CSV_PATH).exists())) {
-    const res = await fetch(CSV_URL);
-    if (!res.ok) throw new Error(`Statements file missing at ${CSV_PATH} and download failed (${res.status} ${CSV_URL})`);
-    await Bun.write(CSV_PATH, await res.text());
-    console.error(`downloaded the statements to ${CSV_PATH}`);
-  }
+  if (!(await Bun.file(CSV_PATH).exists())) return null;
   const raw = (await Bun.file(CSV_PATH).text()).replace(/^﻿/, "");
   const seen = new Set<string>();
   cache = [];

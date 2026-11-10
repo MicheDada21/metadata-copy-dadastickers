@@ -19,8 +19,8 @@ Con altri agenti copia la cartella `skills/metadata-copy-dadastickers` tra le sk
 
 ## Requisiti
 
-Serve [Bun](https://bun.sh). La skill porta con sé la collezione di 13.935 enunciati Dadastickers.
+Serve [Bun](https://bun.sh). Gli enunciati restano sul sito di CH Labs: senza la collezione in locale, la skill li cerca tramite il servizio, fino a 101 enunciati distinti per persona.
 
 ## Licenza
 
-MIT, testo completo in [LICENSE](LICENSE). Fa eccezione la collezione di enunciati Dadastickers in `skills/metadata-copy-dadastickers/data/enunciati.csv`, che resta di Tiziano Boccaccini con tutti i diritti riservati. La skill la cita alla lettera; ripubblicarla, per intero o in buona parte, richiede un permesso scritto.
+MIT, testo completo in [LICENSE](LICENSE).

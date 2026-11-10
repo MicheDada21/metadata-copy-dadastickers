@@ -6,7 +6,7 @@ disable-model-invocation: true
 
 # Metadata copy Dadastickers
 
-This skill gives subpages metadata of their own. Each field opens with plain **facts** about the page, which Google and AI answer engines can quote, and closes with one **statement** from the Dadastickers collection in `data/enunciati.csv`. The statement is the hook that makes a shared link worth opening.
+This skill gives subpages metadata of their own. Each field opens with plain **facts** about the page, which Google and AI answer engines can quote, and closes with one **statement** from the Dadastickers collection. The statement is the hook that makes a shared link worth opening.
 
 ## Setup
 
@@ -16,7 +16,7 @@ This skill gives subpages metadata of their own. Each field opens with plain **f
 D=~/.claude/skills/metadata-copy-dadastickers && mkdir -p $D && curl -fsSL https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadata-copy-dadastickers/bundle.tar.gz | tar -xz -C $D
 ```
 
-When only `data/enunciati.csv` is missing, the scripts download it on first run from the same library. Setup is done when `bun $S/statements.ts stats` prints the statement count.
+The collection is not distributed. Where `data/enunciati.csv` exists (the owner's machine) every script runs locally with no limits. Everywhere else the scripts call the CH Labs service, anonymously and with no signup: each search returns at most 3 candidates, a visitor can see 101 distinct statements in all, and after that searches draw only from those already seen, which stay reusable. Say this to the user when a search returns fewer candidates than expected. The install token lives in `~/.config/dadastickers/token`. Setup is done when `bun $S/statements.ts stats` prints the statement count.
 
 ## Workflow
 
@@ -29,7 +29,7 @@ When only `data/enunciati.csv` is missing, the scripts download it on first run 
    `bun $S/statements.ts pick --field <field> --facts "<facts>" [--suffix "<title template suffix>"] --keywords "<k1,k2,...>" [filters]`
    - `--keywords`: 6 to 15 Italian words, whatever the page's language, since the corpus is Italian. Mix literal terms (banca, conto, viaggio), metaphorical ones (oro, debito, orizzonte) and the section's world. Prefix `=` for an exact word (`=porto` keeps porta out); use spaces for a phrase.
    - Filters: `--character "i denari"`, `--ending question|exclamation|plain`, `--rarity high|low`, `--words 1-4`, `--match "<regex>"`, `--exclude-plan <plan.json>`, `--sort relevance`, `--limit 30`.
-   - `pick` computes the room left from the cap, facts, separator and suffix, and ranks by keyword hits, then by closest fit. Read the top candidates and choose by meaning.
+   - `pick` computes the room left from the cap, facts, separator and suffix, and ranks by keyword hits, then by closest fit. Read the top candidates and choose by meaning. Through the service `--limit` has no effect, and `--match` stays within the same 3-candidate and 101-statement rules.
 
    Done when every field with facts has a statement chosen under rules 3 to 7.
 5. **Check.** Write the plan to `<project>/docs/metadata-copy-dadastickers.json` (format below) and run:
@@ -49,7 +49,7 @@ The opening of each field stands on its own as a quotable answer: what the page 
 
 ### 2. Verbatim
 
-Copy each statement character for character as `statements.ts find` returns it, with its lowercase, spelling and ending, bare of quotes: each one is a collectible sticker. The facts end without punctuation and ` · ` joins the two. When no statement fits, change the facts or the keywords. `check.ts` rejects any statement missing verbatim from the corpus.
+Copy each statement character for character as `statements.ts find` returns it, with its lowercase, spelling and ending, bare of quotes: each one is a collectible sticker. The facts end without punctuation and ` · ` joins the two. When no statement fits, change the facts or the keywords. `check.ts` rejects any statement missing verbatim from the corpus, asking the service yes or no when the corpus is not local.
 
 ### 3. One role per field
 
@@ -121,4 +121,4 @@ A few statements contain profanity; they suit only sites whose tone allows it.
 }
 ```
 
-`bun $S/statements.ts find "<text>"` checks that a statement exists verbatim, and `bun $S/statements.ts stats` gives an overview of the corpus.
+`bun $S/statements.ts find "<text>"` checks that a statement exists verbatim (through the service it answers only exact match or no match, with no nearest statements), and `bun $S/statements.ts stats` gives an overview of the corpus.
