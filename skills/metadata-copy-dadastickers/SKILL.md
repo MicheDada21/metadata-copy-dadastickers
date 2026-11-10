@@ -1,6 +1,6 @@
 ---
 name: metadata-copy-dadastickers
-description: "Gives each subpage its own title, description and share-preview text, pairing plain page facts with a verbatim Dadastickers statement."
+description: "Gives each subpage its own title, description and share-preview text, pairing plain page facts with a verbatim Dadastickers statement. Use when subpages copy the home page's metadata or have none."
 disable-model-invocation: true
 ---
 
