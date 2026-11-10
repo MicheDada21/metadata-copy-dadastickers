@@ -4,7 +4,7 @@ description: "Gives each subpage its own title, description and share-preview te
 disable-model-invocation: true
 ---
 
-# Metadati Dadastickers
+# Metadata copy Dadastickers
 
 This skill gives subpages metadata of their own. Each field opens with plain **facts** about the page, which Google and AI answer engines can quote, and closes with one **statement** from the Dadastickers collection in `data/enunciati.csv`. The statement is the hook that makes a shared link worth opening.
 

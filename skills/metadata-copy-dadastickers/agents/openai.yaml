@@ -1,5 +1,5 @@
 interface:
-  display_name: "Metadati Dadastickers"
+  display_name: "Metadata copy Dadastickers"
   short_description: "Metadati unici per le sottopagine con gli enunciati Dadastickers"
   default_prompt: "Usa $metadata-copy-dadastickers per dare a ogni sottopagina metadati propri dove oggi ripetono quelli della home."
 policy:
