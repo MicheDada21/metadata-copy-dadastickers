@@ -32,7 +32,7 @@ type PageCopy = {
   imageAlt: string;
 };
 
-// Values come from docs/metadati-dadastickers.json after check.ts --write.
+// Values come from docs/metadata-copy-dadastickers.json after check.ts --write.
 export const pageCopy = {
   "/example": {
     title: "...",

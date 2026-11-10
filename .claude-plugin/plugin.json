@@ -1,10 +1,10 @@
 {
-  "name": "metadati-dadastickers",
+  "name": "metadata-copy-dadastickers",
   "description": "Gives each subpage its own title, description and share-preview text, pairing plain page facts with a verbatim Dadastickers statement.",
   "author": {
     "name": "Tiziano Boccaccini"
   },
-  "homepage": "https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadati-dadastickers",
-  "repository": "https://github.com/MicheDada21/metadati-dadastickers",
+  "homepage": "https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadata-copy-dadastickers",
+  "repository": "https://github.com/MicheDada21/metadata-copy-dadastickers",
   "license": "MIT"
 }

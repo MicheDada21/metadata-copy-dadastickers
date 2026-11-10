@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 export const SKILL_DIR = join(dirname(import.meta.path), "..");
 export const CSV_PATH = join(SKILL_DIR, "data", "enunciati.csv");
 // Public copy of the statements, used when the skill was installed without data/.
-export const CSV_URL = "https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadati-dadastickers/files/data/enunciati.csv";
+export const CSV_URL = "https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadata-copy-dadastickers/files/data/enunciati.csv";
 export const SEPARATOR = " · ";
 
 // Character caps per field, verified 2026-10-26. Sources and reasoning: references/limits.md.
@@ -119,7 +119,7 @@ export function compose(field: Field, draft: FieldDraft, separator = SEPARATOR):
   return body + (draft.suffix ?? "");
 }
 
-// Mechanical subset of filtra-stile-linguistico Blocco 1, applied to the facts only (statements stay verbatim).
+// Mechanical subset of umanizza-stile-linguistico Blocco 1, applied to the facts only (statements stay verbatim).
 const STYLE_RULES: [RegExp, string][] = [
   [/—/, "em dash"],
   [/:/, "colon"],

@@ -1,5 +1,5 @@
 ---
-name: metadati-dadastickers
+name: metadata-copy-dadastickers
 description: "Gives each subpage its own title, description and share-preview text, pairing plain page facts with a verbatim Dadastickers statement."
 disable-model-invocation: true
 ---
@@ -13,7 +13,7 @@ This skill gives subpages metadata of their own. Each field opens with plain **f
 `$S` is the `scripts/` folder next to this file; the scripts need Bun. When this file arrived without its folder (read from a URL, or installed as a lone `SKILL.md`), install the full skill into the agent's skills folder and use that copy, for example:
 
 ```bash
-D=~/.claude/skills/metadati-dadastickers && mkdir -p $D && curl -fsSL https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadati-dadastickers/bundle.tar.gz | tar -xz -C $D
+D=~/.claude/skills/metadata-copy-dadastickers && mkdir -p $D && curl -fsSL https://www.cryptohelvetia.com/ch-labs/prompt-library/skills/metadata-copy-dadastickers/bundle.tar.gz | tar -xz -C $D
 ```
 
 When only `data/enunciati.csv` is missing, the scripts download it on first run from the same library. Setup is done when `bun $S/statements.ts stats` prints the statement count.
@@ -24,7 +24,7 @@ When only `data/enunciati.csv` is missing, the scripts download it on first run 
    `bun $S/detect.ts <home-url> --out <scratchpad>/detect.json`
    It reads pages from the sitemap, or crawls links when there is none, with a share-crawler user agent, so it sees the `<head>` that Facebook, LinkedIn and X see. Each field is marked `H` (copy of the home), `m` (missing), `ok` (own) or `-` (alt text on a page without an image). A field is **eligible** when it is `H` or `m`; only eligible fields change, and the home page keeps its metadata. Add `--strict` when the user wants a page changed only if none of its fields is its own. Report own values over a cap and leave them as they are. If no page is eligible, report that and stop.
 2. **Cast.** Group eligible pages by section (the first path segment), run `bun $S/statements.ts characters` and give each section its resident character (rule 4). Record the cast under `sections` in the plan. Done when every section with an eligible page has a character.
-3. **Facts.** Write the facts for every eligible field from the page's H1 and intro in `detect.json` and the route's source, in the page's language. For `og:title` the facts are the page name; for image alt text they describe what the image shows. Italian facts follow Blocco 1 of [filtra-stile-linguistico](https://www.cryptohelvetia.com/ch-labs/prompt-library/chat-preferences/filtra-stile-linguistico.md); `check.ts` flags its mechanical rules. Done when every eligible field in `detect.json` has facts.
+3. **Facts.** Write the facts for every eligible field from the page's H1 and intro in `detect.json` and the route's source, in the page's language. For `og:title` the facts are the page name; for image alt text they describe what the image shows. Italian facts follow Blocco 1 of [umanizza-stile-linguistico](https://www.cryptohelvetia.com/ch-labs/prompt-library/chat-preferences/umanizza-stile-linguistico.md); `check.ts` flags its mechanical rules. Done when every eligible field in `detect.json` has facts.
 4. **Statements.** For each field run:
    `bun $S/statements.ts pick --field <field> --facts "<facts>" [--suffix "<title template suffix>"] --keywords "<k1,k2,...>" [filters]`
    - `--keywords`: 6 to 15 Italian words, whatever the page's language, since the corpus is Italian. Mix literal terms (banca, conto, viaggio), metaphorical ones (oro, debito, orizzonte) and the section's world. Prefix `=` for an exact word (`=porto` keeps porta out); use spaces for a phrase.
@@ -32,7 +32,7 @@ When only `data/enunciati.csv` is missing, the scripts download it on first run 
    - `pick` computes the room left from the cap, facts, separator and suffix, and ranks by keyword hits, then by closest fit. Read the top candidates and choose by meaning.
 
    Done when every field with facts has a statement chosen under rules 3 to 7.
-5. **Check.** Write the plan to `<project>/docs/metadati-dadastickers.json` (format below) and run:
+5. **Check.** Write the plan to `<project>/docs/metadata-copy-dadastickers.json` (format below) and run:
    `bun $S/check.ts <plan.json> --detect <detect.json> --write`
    Repeat until it reports 0 errors. Close a "characters left" warning whenever a better statement or fuller facts can fill the gap. `--write` stores each composed `value`.
 6. **Approve.** Show one table per page (field, length/cap, composed value) and ask in a question widget, with "Approve all (Recommended)" and "Change some pages". This approval is the user's sign-off on the SEO copy, so code changes wait for it.
