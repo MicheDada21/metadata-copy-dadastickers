@@ -118,7 +118,7 @@ export function compose(field: Field, draft: FieldDraft, separator = SEPARATOR):
 const STYLE_RULES: [RegExp, string][] = [
   [/—/, "em dash"],
   [/:/, "colon"],
-  [/;/, "semicolon"],
+  [/;/, "semicolon (metadata rule, stricter than Blocco 1)"],
   [/\bdavvero\b/i, "'davvero' as intensifier"],
   [/\bcrucial/i, "'crucial'"],
   [/\b(fondamentale|chiave)\b/i, "'fondamentale' or 'chiave' used as filler"],
@@ -126,6 +126,8 @@ const STYLE_RULES: [RegExp, string][] = [
   [/\btradizional/i, "'tradizionale' (allowed only before the 1900s)"],
   [/\b(rito|rituale)\b/i, "'rito' or 'rituale' outside a sacred context"],
   [/\bsimbolic/i, "'simbolico' as emphasis"],
+  [/\blavor/i, "'lavoro' or 'lavorare' for what people do (say what they do)"],
+  [/\bprogett[oi]\b/i, "'progetto' for a business idea (name it or say what it is)"],
   [/\bnon\b[^.·]{1,40}\s(ma|bensì)(?=[\s,]|$)/i, "contrastive negation (non X ma Y)"],
   [/[“”"]/, "straight or curly quotes (prefer « »)"],
 ];
