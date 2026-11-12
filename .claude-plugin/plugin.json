@@ -1,6 +1,6 @@
 {
   "name": "metadata-copy-dadastickers",
-  "description": "Gives each subpage its own title, description and share-preview text, pairing plain page facts with a verbatim Dadastickers statement. Use when subpages copy the home page's metadata or have none.",
+  "description": "Gives each subpage its own title, description and share preview, pairing page facts with a verbatim Dadastickers statement from the capped CH Labs service. Use when subpages copy the home metadata or lack it.",
   "author": {
     "name": "Tiziano Boccaccini"
   },
