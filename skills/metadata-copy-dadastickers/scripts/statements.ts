@@ -1,10 +1,11 @@
 // Query the Dadastickers statements.
 //   bun statements.ts pick --field og:description --facts "..." --keywords "denaro,banca,=conto" [filters]
+//   add --chain "<chain so far>" --connector "<next connector>" to pick the next link of a Catena Dada21 chain
 //   bun statements.ts find "<text>"        check that a statement exists verbatim
 //   bun statements.ts characters           recurring characters and how many statements carry each
 //   bun statements.ts stats                corpus overview
 import { callApi } from "./remote";
-import { FIELDS, LIMITS, SEPARATOR, arg, has, len, loadStatements, pad, tokenize, type Field, type Statement } from "./lib";
+import { FIELDS, LIMITS, SEPARATOR, arg, chainText, connectorIssue, has, len, loadStatements, pad, statementsOf, tokenize, type Field, type Statement } from "./lib";
 
 const command = Bun.argv[2];
 const local = await loadStatements();
@@ -53,13 +54,15 @@ async function usedInPlan(path: string | undefined): Promise<Set<string>> {
   const used = new Set<string>();
   if (!path) return used;
   const plan = await Bun.file(path).json();
-  for (const page of plan.pages ?? []) for (const draft of Object.values(page.fields ?? {}) as { statement?: string }[]) {
-    if (draft.statement) used.add(draft.statement.trim());
+  for (const page of plan.pages ?? []) {
+    for (const draft of Object.values(page.fields ?? {}) as { statement?: string }[]) for (const t of statementsOf(draft)) used.add(t);
+    for (const copy of page.copy ?? []) for (const t of statementsOf(copy)) used.add(t);
   }
   return used;
 }
 
 async function pickRemote() {
+  if (arg("--chain")) throw new Error("Catena Dada21 chains need the local corpus (data/enunciati.csv); through the service pick one statement per field.");
   const field = arg("--field");
   if (field && !FIELDS.includes(field as Field)) throw new Error(`Unknown field ${field}. Use one of: ${FIELDS.join(", ")}`);
   const exclude = [...(await usedInPlan(arg("--exclude-plan")))];
@@ -85,8 +88,13 @@ async function pick() {
   const suffix = arg("--suffix") ?? "";
   const separator = arg("--separator") ?? SEPARATOR;
   const limit = field ? LIMITS[field] : undefined;
-  const budget = arg("--budget") ? Number(arg("--budget"))
-    : limit !== undefined ? limit - len(facts.trim()) - len(suffix) - (facts.trim() ? len(separator) : 0) : 999;
+  // With --chain, the room left is what the chain so far and the next join leave free.
+  const chainSoFar = (arg("--chain") ?? "").trim();
+  const connector = arg("--connector");
+  if (chainSoFar) { const issue = connectorIssue(connector); if (issue) throw new Error(issue); }
+  const chainUse = chainSoFar ? len(chainText([{ statement: chainSoFar }, { statement: "", connector }])) : 0;
+  const budget = (arg("--budget") ? Number(arg("--budget"))
+    : limit !== undefined ? limit - len(facts.trim()) - len(suffix) - (facts.trim() ? len(separator) : 0) : 999) - chainUse;
   if (budget <= 0) throw new Error(`No room left: facts and suffix already use the whole ${limit}-character limit.`);
 
   const matchers = (arg("--keywords") ?? "").split(",").filter((k) => k.trim()).map(matcherFor);
@@ -111,7 +119,7 @@ async function pick() {
     .filter((s) => rarity === "any" || (rarity === "high" ? s.rarity >= 9 : s.rarity < 9))
     .filter((s) => !characterRe || characterRe.test(s.text))
     .filter((s) => !match || match.test(s.text))
-    .filter((s) => !used.has(s.text))
+    .filter((s) => !used.has(s.text) && !(chainSoFar && chainSoFar.includes(s.text)))
     .map((s) => {
       const hits = matchers.filter((m) => m.test(s)).map((m) => m.keyword);
       return { s, hits, score: hits.reduce((sum, k) => sum + idf(k), 0), slack: budget - s.length };
@@ -140,7 +148,7 @@ async function find() {
     if (!r.exists) process.exitCode = 1;
     return;
   }
-  const query = (Bun.argv[3] ?? "").trim().replace(/\s+/g, " ");
+  const query = (Bun.argv[3] ?? "").normalize("NFC").trim().replace(/\s+/g, " ");
   const exact = all.find((s) => s.text === query);
   if (exact) { console.log(`exact match (${exact.length} chars, rarity ${exact.rarity})\n${exact.text}`); return; }
   const lower = query.toLowerCase();

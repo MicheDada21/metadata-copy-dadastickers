@@ -87,7 +87,8 @@ export async function loadStatements(): Promise<Statement[] | null> {
   const seen = new Set<string>();
   cache = [];
   for (const cell of parseCsv(raw)) {
-    const text = cell.trim().replace(/\s+/g, " ");
+    // NFC: some rows store accents as a letter plus a combining mark, which breaks verbatim matches and lengths.
+    const text = cell.normalize("NFC").trim().replace(/\s+/g, " ");
     if (!text || seen.has(text)) continue;
     seen.add(text);
     const words = text.split(" ").length;
@@ -104,11 +105,58 @@ export async function loadStatements(): Promise<Statement[] | null> {
   return cache;
 }
 
-export type FieldDraft = { facts: string; statement: string; suffix?: string; value?: string };
+// Catena Dada21: verbatim statements joined by short connectors the agent writes.
+// The first link has no connector; every later link has one: "," alone, a lowercase bridge of 1 to 3 words,
+// or a comma followed by such a bridge (", eppure").
+export type ChainLink = { statement: string; connector?: string };
+export type FieldDraft = { facts: string; statement?: string; chain?: ChainLink[]; suffix?: string; value?: string };
+export type CopyDraft = { slot: string; facts?: string; chain: ChainLink[]; separator?: string; max?: number; value?: string };
+
+export const CONNECTOR_MAX_WORDS = 3;
+// Titles keep a single statement; chains go in descriptions, image alt text and page copy.
+export const SINGLE_STATEMENT: ReadonlySet<Field> = new Set(["title", "og:title", "twitter:title"]);
+
+const normSpace = (s: string) => s.normalize("NFC").trim().replace(/\s+/g, " ");
+
+export function connectorWords(connector: string): string[] {
+  return normSpace(connector.replace(/^,/, "")).split(" ").filter(Boolean);
+}
+
+// Returns why a connector breaks the rules, or null when it is valid.
+export function connectorIssue(connector: string | undefined): string | null {
+  const c = normSpace(connector ?? "");
+  if (!c) return "connector missing (use \",\" for a bare comma)";
+  if (!/^,?[a-zà-öø-ÿ’' ]*$/.test(c)) return `connector «${c}» may hold only lowercase words and one leading comma`;
+  const words = connectorWords(c).length;
+  if (words > CONNECTOR_MAX_WORDS) return `connector «${c}» has ${words} words, max ${CONNECTOR_MAX_WORDS}`;
+  return null;
+}
+
+export function chainText(chain: ChainLink[]): string {
+  return chain.map((link, i) => {
+    const statement = normSpace(link.statement);
+    if (i === 0) return statement;
+    const c = normSpace(link.connector ?? "");
+    if (c === ",") return `, ${statement}`;
+    return c.startsWith(",") ? `, ${normSpace(c.slice(1))} ${statement}` : ` ${c} ${statement}`;
+  }).join("");
+}
+
+export const statementsOf = (d: { statement?: string; chain?: ChainLink[] }): string[] =>
+  (d.chain?.length ? d.chain.map((l) => l.statement) : [d.statement ?? ""]).map(normSpace).filter(Boolean);
+
+export const hookOf = (d: { statement?: string; chain?: ChainLink[] }): string =>
+  d.chain?.length ? chainText(d.chain) : normSpace(d.statement ?? "");
+
+export function composeCopy(draft: CopyDraft, separator = SEPARATOR): string {
+  const facts = (draft.facts ?? "").trim();
+  const chain = chainText(draft.chain);
+  return facts ? `${facts}${draft.separator ?? separator}${chain}` : chain;
+}
 
 export function compose(field: Field, draft: FieldDraft, separator = SEPARATOR): string {
   const facts = draft.facts.trim();
-  const statement = draft.statement.trim();
+  const statement = hookOf(draft);
   const body = !facts ? statement : !statement ? facts
     : STATEMENT_FIRST.has(field) ? `${statement}${separator}${facts}` : `${facts}${separator}${statement}`;
   return body + (draft.suffix ?? "");
