@@ -1,12 +1,12 @@
 // Query the Dadastickers statements.
 //   bun statements.ts pick --field og:description --facts "..." --keywords "denaro,banca,=conto" [filters]
 //   add --chain "<chain so far>" --connector "<next connector>" to pick the next link of a Catena Dada21 chain
-//   add --jev [--jev-context "<audience, tone, page subject>"] for optional OpenRouter semantic selection
+//   add --jev-findings <scan.json> --jev-brief <brief.json> to review an optional full-corpus scan
 //   bun statements.ts find "<text>"        check that a statement exists verbatim
 //   bun statements.ts characters           recurring characters and how many statements carry each
 //   bun statements.ts stats                corpus overview
 import { callApi } from "./remote";
-import { selectWithJev, type JevSelection } from "./jev";
+import { findingsScores, parseBrief, scanSummary, type ScanState } from "./jev";
 import { FIELDS, LIMITS, SEPARATOR, arg, chainText, connectorIssue, has, len, loadStatements, pad, statementsOf, tokenize, type Field, type Statement } from "./lib";
 
 const command = Bun.argv[2];
@@ -63,21 +63,29 @@ async function usedInPlan(path: string | undefined): Promise<Set<string>> {
   return used;
 }
 
-async function semanticPick<T extends { text: string; slack: number }>(candidates: T[], budget: number): Promise<{ candidates: T[]; jev?: JevSelection }> {
-  if (!has("--jev")) return { candidates };
-  return selectWithJev(candidates, {
-    field: arg("--field") ?? "page copy", facts: arg("--facts") ?? "", suffix: arg("--suffix") ?? "",
-    separator: arg("--separator") ?? SEPARATOR, budget,
-    chain: arg("--chain"), connector: arg("--connector"), editorial_context: arg("--jev-context"),
-  });
+type JevFindings = { status: "findings" | "fallback"; reason?: string; task?: string; evaluated?: number; total?: number; complete?: boolean };
+async function semanticFindings(): Promise<{ scores?: Map<string, number>; jev?: JevFindings }> {
+  const path = arg("--jev-findings");
+  if (!path && !has("--jev")) return {};
+  const fallback = (reason: string) => ({ jev: { status: "fallback" as const, reason } });
+  if (!local) return fallback("Full-corpus Jev findings need the local CSV. The capped service and LLM selection remain available.");
+  const briefPath = arg("--jev-brief");
+  if (!path || !briefPath) return fallback("Run jev-scan.ts with an LLM-authored brief, then pass --jev-findings <scan.json> --jev-brief <brief.json>. The LLM makes the final choice.");
+  try {
+    const brief = parseBrief(await Bun.file(briefPath).json());
+    const raw = await Bun.file(path).json();
+    const scores = findingsScores(raw, all, brief);
+    const summary = scanSummary(raw as ScanState);
+    if (summary.status !== "complete") return fallback(`Jev scan is incomplete (${summary.evaluated}/${summary.total}). Resume it or use ordinary LLM selection.`);
+    if (!scores.size) return fallback("Jev has no positive findings. Review the ordinary candidates or revise the creative brief.");
+    return { scores, jev: { status: "findings", task: brief.task, evaluated: summary.evaluated, total: summary.total, complete: summary.status === "complete" } };
+  } catch { return fallback("The Jev findings or brief are missing, invalid or stale. Use ordinary LLM selection or run a matching scan."); }
 }
 
-function showJev(jev: JevSelection | undefined) {
+function showJev(jev: JevFindings | undefined) {
   if (!jev) return;
   if (jev.status === "fallback") { console.log(`Jev optional: ${jev.reason}`); return; }
-  console.log(`Jev recommendation (first row): ${jev.statement}`);
-  if (jev.confidence !== undefined) console.log(`  confidence ${jev.confidence} (model signal, not measured accuracy)`);
-  if (jev.cost !== undefined) console.log(`  OpenRouter usage.cost ${jev.cost}`);
+  console.log(`Jev findings: ${jev.evaluated}/${jev.total} statements scanned${jev.complete ? "" : " (partial)"}. The LLM chooses the final copy.`);
 }
 
 async function pickRemote() {
@@ -91,7 +99,8 @@ async function pickRemote() {
     words: arg("--words"), match: arg("--match"), loose: has("--loose"), sort: arg("--sort"), exclude,
   };
   const r = await callApi<{ limit?: number; budget: number; df: Record<string, number>; unlocked: number; cap: number; candidates: (Statement & { hits: string[]; score: number; slack: number })[] }>("pick", input);
-  const selection = await semanticPick(r.candidates, r.budget);
+  const semantic = await semanticFindings();
+  const selection = { candidates: r.candidates, jev: semantic.jev };
   if (has("--json")) { console.log(JSON.stringify({ field, limit: r.limit, budget: r.budget, candidates: selection.candidates, jev: selection.jev }, null, 2)); return; }
   console.log(`field ${field ?? "-"}  limit ${r.limit ?? "-"}  budget for the statement ${r.budget}  (service: at most 3 candidates, ${r.unlocked}/${r.cap} statements seen)`);
   for (const [k, n] of Object.entries(r.df)) console.log(`  keyword ${pad(k, 18)} in ${n} statements`);
@@ -133,7 +142,8 @@ async function pick() {
   const df = new Map(matchers.map((m) => [m.keyword, all.filter(m.test).length]));
   const idf = (k: string) => Math.log(all.length / (1 + (df.get(k) ?? 0)));
 
-  const rows = all
+  const semantic = await semanticFindings();
+  const eligible = all
     .filter((s) => s.length <= budget)
     .filter((s) => s.words >= minWords && s.words <= maxWords)
     .filter((s) => ending === "any" || s.ending === ending)
@@ -143,15 +153,20 @@ async function pick() {
     .filter((s) => !used.has(s.text) && !(chainSoFar && chainSoFar.includes(s.text)))
     .map((s) => {
       const hits = matchers.filter((m) => m.test(s)).map((m) => m.keyword);
-      return { s, hits, score: hits.reduce((sum, k) => sum + idf(k), 0), slack: budget - s.length };
-    })
+      return { s, hits, score: hits.reduce((sum, k) => sum + idf(k), 0), slack: budget - s.length, jevScore: semantic.scores?.get(s.text) };
+    });
+  // A scan can surface phrases with no keyword overlap. Apply the same mechanical constraints
+  // first, then let the LLM inspect ranked findings; no Jev result becomes an editorial decision.
+  const findings = semantic.scores ? eligible.filter((r) => r.jevScore !== undefined) : [];
+  if (semantic.scores && !findings.length) semantic.jev = { status: "fallback", reason: "No Jev findings fit this field's mechanical constraints. Review the ordinary candidates." };
+  const rows = findings.length ? findings.sort((a, b) => b.jevScore! - a.jevScore! || a.slack - b.slack || b.score - a.score).slice(0, max) : eligible
     .filter((r) => loose || matchers.length === 0 || r.hits.length > 0)
     .sort((a, b) => sort === "relevance"
       ? b.score - a.score || a.slack - b.slack
       : b.hits.length - a.hits.length || a.slack - b.slack || b.score - a.score)
     .slice(0, max);
 
-  const selection = await semanticPick(rows.map((r) => ({ ...r.s, tokens: undefined, hits: r.hits, score: +r.score.toFixed(2), slack: r.slack })), budget);
+  const selection = { candidates: rows.map((r) => ({ ...r.s, tokens: undefined, hits: r.hits, score: +r.score.toFixed(2), slack: r.slack, ...(findings.length ? { jevScore: r.jevScore } : {}) })), jev: semantic.jev };
   if (has("--json")) {
     console.log(JSON.stringify({ field, limit, budget, candidates: selection.candidates, jev: selection.jev }, null, 2));
     return;
