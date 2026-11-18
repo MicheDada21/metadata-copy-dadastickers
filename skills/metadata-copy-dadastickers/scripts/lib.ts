@@ -110,7 +110,7 @@ export async function loadStatements(): Promise<Statement[] | null> {
 // or a comma followed by such a bridge (", eppure").
 export type ChainLink = { statement: string; connector?: string };
 export type FieldDraft = { facts: string; statement?: string; chain?: ChainLink[]; suffix?: string; value?: string };
-export type CopyDraft = { slot: string; facts?: string; chain: ChainLink[]; separator?: string; max?: number; value?: string };
+export type CopyDraft = { slot: string; facts?: string; statement?: string; chain?: ChainLink[]; max?: number; value?: string };
 
 export const CONNECTOR_MAX_WORDS = 3;
 // Titles keep a single statement; chains go in descriptions, image alt text and page copy.
@@ -148,10 +148,17 @@ export const statementsOf = (d: { statement?: string; chain?: ChainLink[] }): st
 export const hookOf = (d: { statement?: string; chain?: ChainLink[] }): string =>
   d.chain?.length ? chainText(d.chain) : normSpace(d.statement ?? "");
 
-export function composeCopy(draft: CopyDraft, separator = SEPARATOR): string {
+export function capitalizeFirst(text: string): string {
+  const i = text.search(/\p{L}/u);
+  return i < 0 ? text : `${text.slice(0, i)}${text[i].toLocaleUpperCase("it")}${text.slice(i + 1)}`;
+}
+
+// Visible page copy reads as prose: the facts close their sentence and the statement opens the next one.
+export function composeCopy(draft: CopyDraft): string {
   const facts = (draft.facts ?? "").trim();
-  const chain = chainText(draft.chain);
-  return facts ? `${facts}${draft.separator ?? separator}${chain}` : chain;
+  const hook = hookOf(draft);
+  if (!facts) return hook;
+  return `${/[.!?…]$/.test(facts) ? facts : `${facts}.`} ${capitalizeFirst(hook)}`;
 }
 
 export function compose(field: Field, draft: FieldDraft, separator = SEPARATOR): string {

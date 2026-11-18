@@ -29,7 +29,7 @@ const errors: string[] = [];
 const warnings: string[] = [];
 
 // Catena Dada21 runs only where the full corpus is local; the capped service is too thin for chains.
-const usesChains = plan.pages.some((p) => (p.copy?.length ?? 0) > 0 || Object.values(p.fields).some((d) => d?.chain?.length));
+const usesChains = plan.pages.some((p) => p.copy?.some((c) => c.chain?.length) || Object.values(p.fields).some((d) => d?.chain?.length));
 if (usesChains && !local) {
   errors.push("the plan uses Catena Dada21 chains, which need the local corpus (data/enunciati.csv); use one statement per field instead");
 }
@@ -37,7 +37,7 @@ if (usesChains && !local) {
 // Without the local corpus, ask the service yes or no for each distinct statement in the plan.
 const verified = new Map<string, boolean>();
 if (!local) {
-  for (const page of plan.pages) for (const d of Object.values(page.fields) as FieldDraft[]) {
+  for (const page of plan.pages) for (const d of [...Object.values(page.fields), ...(page.copy ?? [])] as (FieldDraft | CopyDraft)[]) {
     for (const t of statementsOf(d ?? {})) if (!verified.has(t)) verified.set(t, (await callApi<{ exists: boolean }>("verify", { text: t })).exists);
   }
 }
@@ -110,15 +110,19 @@ for (const page of plan.pages) {
 
   for (const [i, copy] of (page.copy ?? []).entries()) {
     const label = where(`copy «${copy.slot || i + 1}»`);
-    if (!copy.chain?.length) { errors.push(`${label}: chain missing`); continue; }
-    checkChain(label, copy.chain);
-    chainsOnPage.set(chainText(copy.chain), label);
-    copy.value = composeCopy(copy, separator);
+    if (copy.statement) copy.statement = norm(copy.statement);
+    if (copy.chain?.length) {
+      if (copy.statement) errors.push(`${label}: set either "statement" or "chain", not both`);
+      checkChain(label, copy.chain);
+      chainsOnPage.set(chainText(copy.chain), label);
+    } else if (!copy.statement) { errors.push(`${label}: statement or chain missing`); continue; }
+    else if (!inCorpus(copy.statement)) errors.push(`${label}: statement not found verbatim in the corpus (check with statements.ts find)`);
+    copy.value = composeCopy(copy);
     const size = len(copy.value);
     if (copy.max) checkFit(label, size, copy.max);
     if (!copy.facts?.trim()) warnings.push(`${label}: no facts; page copy usually opens with what the page is`);
     for (const issue of styleIssues(copy.facts ?? "")) warnings.push(`${label}: facts contain ${issue}`);
-    for (const l of copy.chain) statementPages.set(norm(l.statement), (statementPages.get(norm(l.statement)) ?? new Set()).add(page.path));
+    for (const s of statementsOf(copy)) statementPages.set(s, (statementPages.get(s) ?? new Set()).add(page.path));
     console.log(`  ${`copy ${copy.slot}`.padEnd(20)}${String(size).padStart(4)}/${copy.max ?? "-"}  ${copy.value}`);
   }
 
@@ -126,7 +130,7 @@ for (const page of plan.pages) {
   const wordUse = new Map<string, string[]>();
   const all = [
     ...Object.values(page.fields).filter((d) => d?.chain?.length).map((d) => d!.chain!),
-    ...(page.copy ?? []).filter((c) => c.chain?.length).map((c) => c.chain),
+    ...(page.copy ?? []).filter((c) => c.chain?.length).map((c) => c.chain!),
   ];
   const counted = new Set<string>();
   for (const chain of all) {
@@ -142,7 +146,7 @@ for (const page of plan.pages) {
   const character = plan.sections?.[sectionOf(page)]?.character;
   if (character) {
     const re = new RegExp(`(^|[^a-zà-ÿ])${character.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([^a-zà-ÿ]|$)`, "i");
-    const texts = [...Object.values(page.fields).flatMap((d) => statementsOf(d ?? {})), ...(page.copy ?? []).flatMap((c) => c.chain.map((l) => l.statement))];
+    const texts = [...Object.values(page.fields).flatMap((d) => statementsOf(d ?? {})), ...(page.copy ?? []).flatMap((c) => statementsOf(c))];
     if (!texts.some((t) => re.test(t))) warnings.push(`${page.path}: no statement features the section character «${character}»`);
   }
   if (seen) {

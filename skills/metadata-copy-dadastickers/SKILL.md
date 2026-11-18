@@ -52,7 +52,7 @@ The opening of each field stands on its own as a quotable answer: what the page 
 
 ### 2. Verbatim
 
-Copy each statement character for character as `statements.ts find` returns it, with its lowercase, spelling and ending, bare of quotes: each one is a collectible sticker. The facts end without punctuation and ` · ` joins the two. When no statement fits, change the facts or the keywords. `check.ts` rejects any statement missing verbatim from the corpus, asking the service yes or no when the corpus is not local.
+Copy each statement character for character as `statements.ts find` returns it, with its lowercase, spelling and ending, bare of quotes: each one is a collectible sticker. In metadata fields the facts end without punctuation and ` · ` joins the two; visible page copy follows rule 9. When no statement fits, change the facts or the keywords. `check.ts` rejects any statement missing verbatim from the corpus, asking the service yes or no when the corpus is not local.
 
 ### 3. One role per field
 
@@ -110,12 +110,16 @@ A few statements contain profanity; they suit only sites whose tone allows it.
 Catena Dada21 ([dada21.com/esperimenti/catena-dada21](https://dada21.com/esperimenti/catena-dada21)) joins verbatim statements with short connectors, the only words not taken from the collection. A chain replaces the single statement where a field has room for more than one, and it writes on-page copy when the task asks for it.
 
 - **Where.** `description`, `og:description`, `twitter:description` and image alt text, plus the page-copy slots the task names (a hero intro, a section blurb, an empty state). Titles keep one statement.
-- **Order.** Facts first, then ` · `, then the chain, as in rule 1. Page copy may drop the facts when the slot is pure voice, such as a footer line.
+- **Order.** In metadata, facts first, then ` · `, then the chain, as in rule 1. Page copy follows rule 9 and may drop the facts when the slot is pure voice, such as a footer line.
 - **Connectors.** Write them yourself: a bare comma (`,`), a lowercase bridge of 1 to 3 words (`eppure`, `proprio mentre`), or a comma followed by one (`, e intanto`). No full stops, colons or capitals, so the chain reads as one open fragment. A connector bridges and never rewrites: it must not carry the meaning the statements lack.
 - **No lexical repetition.** A connector word appears at most once across all chains on a page, and a statement appears at most once in a chain. A twitter field that mirrors its og field counts once.
 - **Length.** Keep adding links while the field has room (rule 7). For page copy, take the length from the task and record it as `max`.
 
 `check.ts` enforces the connector form, the 3-word cap, the page-wide repetition rule and the verbatim statements. Whether a join makes sense is your call, and the user signs it off in step 6.
+
+### 9. Visible page copy
+
+Text people read on the page never uses ` · `. The page's sentence closes with its full stop, and the statement follows in the same paragraph as the next sentence, with its first letter capitalized: `Prima la domanda, poi il prodotto. Chi sono io perché tu sei tu?`. The capital is the only change: the statement keeps its spelling and ending and takes no added full stop. A chain capitalizes only its first letter. In the plan, keep the statement exactly as `statements.ts find` returns it, and `check.ts` writes the capital into `value`. A pure-voice slot with no facts keeps the statement lowercase.
 
 ## Plan format
 
@@ -155,6 +159,6 @@ Catena Dada21 ([dada21.com/esperimenti/catena-dada21](https://dada21.com/esperim
 }
 ```
 
-A field takes either `statement` or `chain`, never both; in a chain only the links after the first carry a `connector`. `copy` lists the on-page slots the task asks for, and `--write` stores each composed text as `value` there too.
+A field or `copy` slot takes either `statement` or `chain`, never both; in a chain only the links after the first carry a `connector`. `copy` lists the on-page slots the task asks for, and `--write` stores each composed text as `value` there too.
 
 `bun $S/statements.ts find "<text>"` checks that a statement exists verbatim (through the service it answers only exact match or no match, with no nearest statements), and `bun $S/statements.ts stats` gives an overview of the corpus.
