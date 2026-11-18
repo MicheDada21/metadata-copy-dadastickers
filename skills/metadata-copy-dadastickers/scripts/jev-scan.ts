@@ -2,7 +2,7 @@
 import { existsSync, mkdirSync, openSync, closeSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { arg, has, loadStatements } from "./lib";
-import { parseBrief, prepareScan, scanSummary, scanWithJev, type ScanState } from "./jev";
+import { DEFAULT_MIN_SCORE, estimateCost, parseBrief, prepareScan, scanSummary, scanWithJev, type ScanState } from "./jev";
 
 async function main() {
   const rows = await loadStatements();
@@ -20,12 +20,12 @@ async function main() {
   const resume = out && existsSync(out) ? await Bun.file(out).json() : undefined;
   const plan = prepareScan(rows, brief, batchSize, resume);
   if (has("--dry-run")) {
-    console.log(JSON.stringify({ ...scanSummary(plan.state), status: "planned", dryRun: true, model: plan.state.model, batchSize, concurrency, requestsRemaining: plan.batches.length, maxRequestBytes: plan.maxRequestBytes }, null, 2));
+    console.log(JSON.stringify({ ...scanSummary(plan.state), status: "planned", dryRun: true, model: plan.state.model, batchSize, concurrency, requestsRemaining: plan.batches.length, maxRequestBytes: plan.maxRequestBytes, estimatedCostUsd: estimateCost(plan), estimate: "From the measured rate of $0.011 per MB sent; the real charge is in cost after the scan." }, null, 2));
     return;
   }
   if (!process.env.OPENROUTER_API_KEY?.trim() && plan.batches.length) { console.log(JSON.stringify({ status: "fallback", reason: "OPENROUTER_API_KEY is not configured. Use ordinary LLM selection; no signup is required." })); return; }
   const save = (state: ScanState, final = false) => {
-    const findings = final ? rows.map((r, i) => ({ statement: r.text, score: state.scores[i] })).filter((r) => r.score !== null && r.score > 0).sort((a, b) => b.score! - a.score!).slice(0, 60) : undefined;
+    const findings = final ? rows.map((r, i) => ({ statement: r.text, score: state.scores[i] })).filter((r) => r.score !== null && r.score >= DEFAULT_MIN_SCORE).sort((a, b) => b.score! - a.score!).slice(0, 60) : undefined;
     writeFileSync(`${out}.tmp`, JSON.stringify({ ...state, summary: scanSummary(state), findings }, null, 2), { mode: 0o600 });
     renameSync(`${out}.tmp`, out!);
   };

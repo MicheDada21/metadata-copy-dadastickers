@@ -5,6 +5,13 @@ export const JEV_MODEL = "typesafe/jev-1.14";
 const ENDPOINT = "https://openrouter.ai/api/alpha/decisions";
 export const DEFAULT_BATCH_SIZE = 8;
 export const MAX_REQUEST_BYTES = 12_000;
+// Scores are continuous (a full scan had none at 0, median 1.2, 90th percentile 1.8), so a
+// finding is a score at or above this threshold, not any positive score.
+export const DEFAULT_MIN_SCORE = 1.5;
+// Measured on 2026-11-18: a complete 13,935-statement scan sent 13.6 MB in 1,742 requests for $0.150.
+export const USD_PER_REQUEST_MB = 0.011;
+const RETRY_STATUS = new Set([429, 502, 503]);
+const MAX_ATTEMPTS = 4;
 export type JevRequest = (...args: Parameters<typeof fetch>) => ReturnType<typeof fetch>;
 export type Brief = { task: string; purpose: string; audience: string; tone: string; directions: string[]; avoid: string[] };
 type TextRow = { text: string };
@@ -72,12 +79,26 @@ export function prepareScan(rows: TextRow[], brief: Brief, batchSize = DEFAULT_B
   return { state, batches, maxRequestBytes };
 }
 
+export function estimateCost(plan: ScanPlan) {
+  const mb = plan.batches.reduce((sum, b) => sum + bytes(b.body), 0) / 1_000_000;
+  return +(mb * USD_PER_REQUEST_MB).toFixed(3);
+}
+
 export function scanSummary(state: ScanState) {
   const evaluated = state.scores.filter((s) => s !== null).length;
   return { status: evaluated === state.scores.length ? "complete" : evaluated ? "partial" : "fallback", total: state.scores.length, evaluated, pending: state.scores.length - evaluated, requests: state.requests, cost: state.cost, costIncomplete: state.costIncomplete, failures: state.failures };
 }
 
-export async function scanWithJev(plan: ScanPlan, options: { apiKey?: string; request?: JevRequest; concurrency?: number; onBatch?: (state: ScanState) => void } = {}): Promise<ScanState> {
+const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
+
+// 429, 502 and 503 return no generation and no billing, so they are retried with backoff.
+// Timeouts and other errors may already be charged: they stop the scan without retrying.
+function retryDelay(response: Response, attempt: number) {
+  const header = Number(response.headers.get("retry-after"));
+  return Math.min(30_000, Number.isFinite(header) && header > 0 ? header * 1000 : 2000 * 2 ** attempt);
+}
+
+export async function scanWithJev(plan: ScanPlan, options: { apiKey?: string; request?: JevRequest; concurrency?: number; onBatch?: (state: ScanState) => void; sleep?: (ms: number) => Promise<unknown> } = {}): Promise<ScanState> {
   const apiKey = (options.apiKey ?? process.env.OPENROUTER_API_KEY)?.trim();
   if (!apiKey && plan.batches.length) throw Error("OPENROUTER_API_KEY is not configured. Continue with the ordinary LLM selection workflow.");
   const concurrency = options.concurrency ?? 4;
@@ -92,7 +113,13 @@ export async function scanWithJev(plan: ScanPlan, options: { apiKey?: string; re
       let scores: number[] | undefined;
       state.requests++;
       try {
-        const response = await (options.request ?? fetch)(ENDPOINT, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: batch.body, signal: AbortSignal.timeout(15_000) });
+        let response: Response;
+        for (let attempt = 0; ; attempt++) {
+          response = await (options.request ?? fetch)(ENDPOINT, { method: "POST", headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" }, body: batch.body, signal: AbortSignal.timeout(15_000) });
+          if (!RETRY_STATUS.has(response.status) || attempt + 1 >= MAX_ATTEMPTS || halted) break;
+          await response.body?.cancel();
+          await (options.sleep ?? wait)(retryDelay(response, attempt));
+        }
         if (!response.ok) { error = `HTTP ${response.status}`; halted = true; }
         else {
           const raw: unknown = await response.json();
@@ -120,7 +147,8 @@ export async function scanWithJev(plan: ScanPlan, options: { apiKey?: string; re
   return state;
 }
 
+// Every valid score, keyed by statement; callers apply the findings threshold.
 export function findingsScores(raw: unknown, rows: TextRow[], brief: Brief): Map<string, number> {
   const plan = prepareScan(rows, brief, record(raw) && typeof raw.batchSize === "number" ? raw.batchSize : DEFAULT_BATCH_SIZE, raw);
-  return new Map(rows.flatMap((row, i) => plan.state.scores[i] !== null && plan.state.scores[i]! > 0 ? [[row.text, plan.state.scores[i]!] as const] : []));
+  return new Map(rows.flatMap((row, i) => plan.state.scores[i] !== null ? [[row.text, plan.state.scores[i]!] as const] : []));
 }

@@ -1,12 +1,12 @@
 // Query the Dadastickers statements.
 //   bun statements.ts pick --field og:description --facts "..." --keywords "denaro,banca,=conto" [filters]
 //   add --chain "<chain so far>" --connector "<next connector>" to pick the next link of a Catena Dada21 chain
-//   add --jev-findings <scan.json> --jev-brief <brief.json> to review an optional full-corpus scan
+//   add --jev-findings <scan.json> --jev-brief <brief.json> [--jev-min 1.5] to merge an optional full-corpus scan
 //   bun statements.ts find "<text>"        check that a statement exists verbatim
 //   bun statements.ts characters           recurring characters and how many statements carry each
 //   bun statements.ts stats                corpus overview
 import { callApi } from "./remote";
-import { findingsScores, parseBrief, scanSummary, type ScanState } from "./jev";
+import { DEFAULT_MIN_SCORE, findingsScores, parseBrief, scanSummary, type ScanState } from "./jev";
 import { FIELDS, LIMITS, SEPARATOR, arg, chainText, connectorIssue, has, len, loadStatements, pad, statementsOf, tokenize, type Field, type Statement } from "./lib";
 
 const command = Bun.argv[2];
@@ -63,7 +63,7 @@ async function usedInPlan(path: string | undefined): Promise<Set<string>> {
   return used;
 }
 
-type JevFindings = { status: "findings" | "fallback"; reason?: string; task?: string; evaluated?: number; total?: number; complete?: boolean };
+type JevFindings = { status: "findings" | "fallback"; reason?: string; task?: string; evaluated?: number; total?: number; complete?: boolean; minScore?: number; findings?: number };
 async function semanticFindings(): Promise<{ scores?: Map<string, number>; jev?: JevFindings }> {
   const path = arg("--jev-findings");
   if (!path && !has("--jev")) return {};
@@ -74,18 +74,21 @@ async function semanticFindings(): Promise<{ scores?: Map<string, number>; jev?:
   try {
     const brief = parseBrief(await Bun.file(briefPath).json());
     const raw = await Bun.file(path).json();
+    const minScore = Number(arg("--jev-min") ?? DEFAULT_MIN_SCORE);
+    if (!Number.isFinite(minScore) || minScore < 0 || minScore > 3) return fallback("--jev-min must be a score from 0 to 3.");
     const scores = findingsScores(raw, all, brief);
     const summary = scanSummary(raw as ScanState);
     if (summary.status !== "complete") return fallback(`Jev scan is incomplete (${summary.evaluated}/${summary.total}). Resume it or use ordinary LLM selection.`);
-    if (!scores.size) return fallback("Jev has no positive findings. Review the ordinary candidates or revise the creative brief.");
-    return { scores, jev: { status: "findings", task: brief.task, evaluated: summary.evaluated, total: summary.total, complete: summary.status === "complete" } };
+    const findings = [...scores.values()].filter((v) => v >= minScore).length;
+    if (!findings) return fallback(`No Jev score reaches ${minScore}. Lower --jev-min, revise the creative brief or use the keyword candidates.`);
+    return { scores, jev: { status: "findings", task: brief.task, evaluated: summary.evaluated, total: summary.total, complete: true, minScore, findings } };
   } catch { return fallback("The Jev findings or brief are missing, invalid or stale. Use ordinary LLM selection or run a matching scan."); }
 }
 
 function showJev(jev: JevFindings | undefined) {
   if (!jev) return;
   if (jev.status === "fallback") { console.log(`Jev optional: ${jev.reason}`); return; }
-  console.log(`Jev findings: ${jev.evaluated}/${jev.total} statements scanned${jev.complete ? "" : " (partial)"}. The LLM chooses the final copy.`);
+  console.log(`Jev findings: ${jev.findings} of ${jev.total} statements score ${jev.minScore} or more. Jev and keyword candidates are merged; the LLM chooses the final copy.`);
 }
 
 async function pickRemote() {
@@ -155,18 +158,25 @@ async function pick() {
       const hits = matchers.filter((m) => m.test(s)).map((m) => m.keyword);
       return { s, hits, score: hits.reduce((sum, k) => sum + idf(k), 0), slack: budget - s.length, jevScore: semantic.scores?.get(s.text) };
     });
-  // A scan can surface phrases with no keyword overlap. Apply the same mechanical constraints
-  // first, then let the LLM inspect ranked findings; no Jev result becomes an editorial decision.
-  const findings = semantic.scores ? eligible.filter((r) => r.jevScore !== undefined) : [];
-  if (semantic.scores && !findings.length) semantic.jev = { status: "fallback", reason: "No Jev findings fit this field's mechanical constraints. Review the ordinary candidates." };
-  const rows = findings.length ? findings.sort((a, b) => b.jevScore! - a.jevScore! || a.slack - b.slack || b.score - a.score).slice(0, max) : eligible
+  // A scan can surface phrases with no keyword overlap. Apply the same mechanical constraints first,
+  // then merge the top Jev findings with the top keyword candidates; neither list is an editorial decision.
+  const minScore = semantic.jev?.minScore ?? DEFAULT_MIN_SCORE;
+  const findings = semantic.scores ? eligible.filter((r) => r.jevScore !== undefined && r.jevScore >= minScore) : [];
+  if (semantic.scores && semantic.jev?.status === "findings" && !findings.length) semantic.jev = { status: "fallback", reason: `No Jev finding at ${minScore} or more fits this field's mechanical constraints. Review the keyword candidates.` };
+  const lexical = eligible
     .filter((r) => loose || matchers.length === 0 || r.hits.length > 0)
     .sort((a, b) => sort === "relevance"
       ? b.score - a.score || a.slack - b.slack
-      : b.hits.length - a.hits.length || a.slack - b.slack || b.score - a.score)
-    .slice(0, max);
+      : b.hits.length - a.hits.length || a.slack - b.slack || b.score - a.score);
+  const jevRows = findings.sort((a, b) => b.jevScore! - a.jevScore! || a.slack - b.slack || b.score - a.score).slice(0, max);
+  const seen = new Set(jevRows.map((r) => r.s.text));
+  const rows = [
+    ...jevRows.map((r) => ({ ...r, source: "jev" as const })),
+    ...lexical.filter((r) => !seen.has(r.s.text)).slice(0, jevRows.length ? Math.ceil(max / 2) : max).map((r) => ({ ...r, source: "keywords" as const })),
+  ];
+  const merged = jevRows.length > 0;
 
-  const selection = { candidates: rows.map((r) => ({ ...r.s, tokens: undefined, hits: r.hits, score: +r.score.toFixed(2), slack: r.slack, ...(findings.length ? { jevScore: r.jevScore } : {}) })), jev: semantic.jev };
+  const selection = { candidates: rows.map((r) => ({ ...r.s, tokens: undefined, hits: r.hits, score: +r.score.toFixed(2), slack: r.slack, ...(merged ? { source: r.source, jevScore: r.jevScore } : {}) })), jev: semantic.jev };
   if (has("--json")) {
     console.log(JSON.stringify({ field, limit, budget, candidates: selection.candidates, jev: selection.jev }, null, 2));
     return;
@@ -175,8 +185,12 @@ async function pick() {
   for (const k of matchers) console.log(`  keyword ${pad(k.keyword, 18)} in ${df.get(k.keyword)} statements`);
   if (!rows.length) console.log("No candidates. Add synonyms or metaphorical keywords, relax a filter, or shorten the facts.");
   showJev(selection.jev);
-  console.log(`${pad("slack", 6)}${pad("len", 5)}${pad("rar", 5)}${pad("hits", 24)}statement`);
-  for (const c of selection.candidates) console.log(`${pad(c.slack, 6)}${pad(c.length, 5)}${pad(c.rarity, 5)}${pad(c.hits.join(",") || "-", 24)}${c.text}`);
+  const jevCol = (c: { jevScore?: number }) => (merged ? pad(c.jevScore?.toFixed(2) ?? "-", 6) : "");
+  console.log(`${merged ? pad("jev", 6) : ""}${pad("slack", 6)}${pad("len", 5)}${pad("rar", 5)}${pad("hits", 24)}statement`);
+  for (const [i, c] of selection.candidates.entries()) {
+    if (merged && i === jevRows.length && i < rows.length) console.log("keyword candidates:");
+    console.log(`${jevCol(c)}${pad(c.slack, 6)}${pad(c.length, 5)}${pad(c.rarity, 5)}${pad(c.hits.join(",") || "-", 24)}${c.text}`);
+  }
 }
 
 async function find() {
