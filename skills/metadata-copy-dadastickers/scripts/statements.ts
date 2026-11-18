@@ -1,10 +1,12 @@
 // Query the Dadastickers statements.
 //   bun statements.ts pick --field og:description --facts "..." --keywords "denaro,banca,=conto" [filters]
 //   add --chain "<chain so far>" --connector "<next connector>" to pick the next link of a Catena Dada21 chain
+//   add --jev [--jev-context "<audience, tone, page subject>"] for optional OpenRouter semantic selection
 //   bun statements.ts find "<text>"        check that a statement exists verbatim
 //   bun statements.ts characters           recurring characters and how many statements carry each
 //   bun statements.ts stats                corpus overview
 import { callApi } from "./remote";
+import { selectWithJev, type JevSelection } from "./jev";
 import { FIELDS, LIMITS, SEPARATOR, arg, chainText, connectorIssue, has, len, loadStatements, pad, statementsOf, tokenize, type Field, type Statement } from "./lib";
 
 const command = Bun.argv[2];
@@ -61,6 +63,23 @@ async function usedInPlan(path: string | undefined): Promise<Set<string>> {
   return used;
 }
 
+async function semanticPick<T extends { text: string; slack: number }>(candidates: T[], budget: number): Promise<{ candidates: T[]; jev?: JevSelection }> {
+  if (!has("--jev")) return { candidates };
+  return selectWithJev(candidates, {
+    field: arg("--field") ?? "page copy", facts: arg("--facts") ?? "", suffix: arg("--suffix") ?? "",
+    separator: arg("--separator") ?? SEPARATOR, budget,
+    chain: arg("--chain"), connector: arg("--connector"), editorial_context: arg("--jev-context"),
+  });
+}
+
+function showJev(jev: JevSelection | undefined) {
+  if (!jev) return;
+  if (jev.status === "fallback") { console.log(`Jev optional: ${jev.reason}`); return; }
+  console.log(`Jev recommendation (first row): ${jev.statement}`);
+  if (jev.confidence !== undefined) console.log(`  confidence ${jev.confidence} (model signal, not measured accuracy)`);
+  if (jev.cost !== undefined) console.log(`  OpenRouter usage.cost ${jev.cost}`);
+}
+
 async function pickRemote() {
   if (arg("--chain")) throw new Error("Catena Dada21 chains need the local corpus (data/enunciati.csv); through the service pick one statement per field.");
   const field = arg("--field");
@@ -72,12 +91,14 @@ async function pickRemote() {
     words: arg("--words"), match: arg("--match"), loose: has("--loose"), sort: arg("--sort"), exclude,
   };
   const r = await callApi<{ limit?: number; budget: number; df: Record<string, number>; unlocked: number; cap: number; candidates: (Statement & { hits: string[]; score: number; slack: number })[] }>("pick", input);
-  if (has("--json")) { console.log(JSON.stringify({ field, limit: r.limit, budget: r.budget, candidates: r.candidates }, null, 2)); return; }
+  const selection = await semanticPick(r.candidates, r.budget);
+  if (has("--json")) { console.log(JSON.stringify({ field, limit: r.limit, budget: r.budget, candidates: selection.candidates, jev: selection.jev }, null, 2)); return; }
   console.log(`field ${field ?? "-"}  limit ${r.limit ?? "-"}  budget for the statement ${r.budget}  (service: at most 3 candidates, ${r.unlocked}/${r.cap} statements seen)`);
   for (const [k, n] of Object.entries(r.df)) console.log(`  keyword ${pad(k, 18)} in ${n} statements`);
   if (!r.candidates.length) console.log("No candidates. Add synonyms or metaphorical keywords, relax a filter, or shorten the facts.");
+  showJev(selection.jev);
   console.log(`${pad("slack", 6)}${pad("len", 5)}${pad("rar", 5)}${pad("hits", 24)}statement`);
-  for (const c of r.candidates) console.log(`${pad(c.slack, 6)}${pad(c.length, 5)}${pad(c.rarity, 5)}${pad(c.hits.join(",") || "-", 24)}${c.text}`);
+  for (const c of selection.candidates) console.log(`${pad(c.slack, 6)}${pad(c.length, 5)}${pad(c.rarity, 5)}${pad(c.hits.join(",") || "-", 24)}${c.text}`);
 }
 
 async function pick() {
@@ -130,15 +151,17 @@ async function pick() {
       : b.hits.length - a.hits.length || a.slack - b.slack || b.score - a.score)
     .slice(0, max);
 
+  const selection = await semanticPick(rows.map((r) => ({ ...r.s, tokens: undefined, hits: r.hits, score: +r.score.toFixed(2), slack: r.slack })), budget);
   if (has("--json")) {
-    console.log(JSON.stringify({ field, limit, budget, candidates: rows.map((r) => ({ ...r.s, tokens: undefined, hits: r.hits, score: +r.score.toFixed(2), slack: r.slack })) }, null, 2));
+    console.log(JSON.stringify({ field, limit, budget, candidates: selection.candidates, jev: selection.jev }, null, 2));
     return;
   }
   console.log(`field ${field ?? "-"}  limit ${limit ?? "-"}  facts ${len(facts.trim())}  suffix ${len(suffix)}  budget for the statement ${budget}`);
   for (const k of matchers) console.log(`  keyword ${pad(k.keyword, 18)} in ${df.get(k.keyword)} statements`);
   if (!rows.length) console.log("No candidates. Add synonyms or metaphorical keywords, relax a filter, or shorten the facts.");
+  showJev(selection.jev);
   console.log(`${pad("slack", 6)}${pad("len", 5)}${pad("rar", 5)}${pad("hits", 24)}statement`);
-  for (const r of rows) console.log(`${pad(r.slack, 6)}${pad(r.s.length, 5)}${pad(r.s.rarity, 5)}${pad(r.hits.join(",") || "-", 24)}${r.s.text}`);
+  for (const c of selection.candidates) console.log(`${pad(c.slack, 6)}${pad(c.length, 5)}${pad(c.rarity, 5)}${pad(c.hits.join(",") || "-", 24)}${c.text}`);
 }
 
 async function find() {
