@@ -30,7 +30,12 @@ The collection is not distributed. Where `data/enunciati.csv` exists (the owner'
    - `--keywords`: 6 to 15 Italian words, whatever the page's language, since the corpus is Italian. Mix literal terms (banca, conto, viaggio), metaphorical ones (oro, debito, orizzonte) and the section's world. Prefix `=` for an exact word (`=porto` keeps porta out); use spaces for a phrase.
    - Filters: `--character "i denari"`, `--ending question|exclamation|plain`, `--rarity high|low`, `--words 1-4`, `--match "<regex>"`, `--exclude-plan <plan.json>`, `--sort relevance`, `--limit 30`.
    - `pick` computes the room left from the cap, facts, separator and suffix, and ranks by keyword hits, then by closest fit. Read the top candidates and choose by meaning. Through the service `--limit` has no effect, and `--match` stays within the same 3-candidate and 101-statement rules.
-   - Optional Jev discovery (local CSV and authorized OpenRouter spending only): write a creative brief, scan the whole corpus once, then add `--jev-findings` and `--jev-brief` to `pick` to merge Jev's findings with the keyword candidates. Jev scores are discovery signals; you make the final choice. Follow [references/jev.md](references/jev.md).
+   - Optional Jev discovery (local CSV and `OPENROUTER_API_KEY` only): write a creative brief, scan the whole corpus once, then add `--jev-findings` and `--jev-brief` to `pick` to merge Jev's findings with the keyword candidates. Jev scores are discovery signals; you make the final choice. Follow [references/jev.md](references/jev.md). Keyword search stays the default. Propose a scan, with the dry run's `estimatedCostUsd`, and wait for the user's yes when at least one of these holds:
+     - after one round of revised keywords, a field still has fewer than 5 candidates that fit by meaning, or only literal matches;
+     - the page's subject has little vocabulary in the corpus (software, financial products, legal terms), so a good statement must come through metaphor or irony;
+     - the task asks for chains (rule 8) or page-copy slots, which need many distinct statements;
+     - 10 or more eligible fields share one intent, so one scan serves them all.
+     Otherwise keep to keyword search. One approved scan covers every field that shares its brief.
    - Chains (rule 8, local corpus only): pick the first statement as above, then each next link with `--chain "<chain so far>" --connector "<next connector>"`, which subtracts the chain and the join from the room left. For page copy, pass `--budget <max>` instead of `--field`.
 
    Done when every field with facts has a statement or chain chosen under rules 3 to 8, and every page-copy slot the task asks for has its chain.
